@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: daemon-git
-Version: 0.1.0
-Summary: Auto-sync local git repos on a schedule.
-Requires-Python: >=3.10
-Requires-Dist: click>=8.1
-Requires-Dist: tomli>=2.0; python_version < "3.11"
