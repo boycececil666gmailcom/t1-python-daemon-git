@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daemon-git"
+version = "0.1.0"
+description = "Auto-sync local git repos on a schedule."
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.scripts]
+daemon-git = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli", "config"]

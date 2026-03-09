@@ -1,0 +1,9 @@
+cli.py
+config.py
+pyproject.toml
+daemon_git.egg-info/PKG-INFO
+daemon_git.egg-info/SOURCES.txt
+daemon_git.egg-info/dependency_links.txt
+daemon_git.egg-info/entry_points.txt
+daemon_git.egg-info/requires.txt
+daemon_git.egg-info/top_level.txt
