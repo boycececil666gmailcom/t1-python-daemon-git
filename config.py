@@ -13,21 +13,27 @@ from urllib.parse import urlparse
 
 CONFIG_PATH = Path.home() / ".daemon-git" / "config.toml"
 
-DEFAULT_CONFIG = """\
-[settings]
+def _default_config(dirs: list[str], interval: int) -> str:
+    paths_toml = ",\n    ".join(f'"{d.replace("\\", "\\\\")}"' for d in dirs)
+    return f"""[settings]
 # How often to pull, in seconds
-interval = 60
+interval = {interval}
 
 # Directories to scan for git repositories
 [directories]
 paths = [
-    "C:\\\\Users\\\\yourname\\\\projects",
+    {paths_toml},
 ]
 
 # Authentication is handled via the GitHub CLI.
 # Run 'gh auth login' once before using daemon-git.
 # No credentials need to be stored here.
 """
+
+
+DEFAULT_CONFIG = _default_config(
+    [str(Path.home() / "projects")], 60
+)
 
 
 def load() -> dict:
@@ -40,11 +46,12 @@ def load() -> dict:
         return tomllib.load(f)
 
 
-def init_config() -> None:
+def init_config(dirs: list[str] | None = None, interval: int = 60) -> None:
     """Write the default config template if it does not already exist."""
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(DEFAULT_CONFIG, encoding="utf-8")
+        content = _default_config(dirs or [str(Path.home() / "projects")], interval)
+        CONFIG_PATH.write_text(content, encoding="utf-8")
 
 
 def get_dirs(cfg: dict) -> list[str]:

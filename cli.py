@@ -45,7 +45,7 @@ def _find_repos(roots: list[str]) -> list[str]:
 def _remote_url(repo: str) -> str:
     r = subprocess.run(
         ["git", "-C", repo, "remote", "get-url", "origin"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
     )
     return r.stdout.strip() if r.returncode == 0 else ""
 
@@ -64,7 +64,7 @@ def _pull(repo: str, cfg: dict) -> str:
     try:
         r = subprocess.run(
             ["git", "-C", repo] + extra + ["pull", "--ff-only"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
         )
     except subprocess.TimeoutExpired:
         return "error: timed out"
@@ -127,7 +127,7 @@ def _list_github_repos() -> list[dict]:
     while True:
         r = subprocess.run(
             ["gh", "api", f"/user/repos?per_page=100&page={page}&affiliation=owner"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
         if r.returncode != 0:
             click.echo(click.style(f"  GitHub API error: {r.stderr.strip()}", fg="red"))
@@ -143,12 +143,16 @@ def _list_github_repos() -> list[dict]:
 def _ensure_cloned(cfg: dict, dest_root: str) -> None:
     """Clone any GitHub repos not yet present in *dest_root* using gh CLI."""
     # Check gh is available and authenticated
-    if subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=5).returncode != 0:
+    try:
+        result = subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=5)
+    except FileNotFoundError:
+        return  # gh CLI not installed — skip silently
+    if result.returncode != 0:
         return
 
     username_r = subprocess.run(
         ["gh", "api", "user", "--jq", ".login"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
     )
     if username_r.returncode != 0:
         return
@@ -182,7 +186,7 @@ def _ensure_cloned(cfg: dict, dest_root: str) -> None:
         click.echo(f"  Cloning {name}…")
         r = subprocess.run(
             ["gh", "repo", "clone", repo["full_name"], target],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, encoding="utf-8", timeout=300,
         )
         if r.returncode == 0:
             click.echo(click.style(f"  ✔ Cloned {name}", fg="green"))
@@ -196,6 +200,46 @@ def _ensure_cloned(cfg: dict, dest_root: str) -> None:
 @click.group()
 def cli():
     """daemon-git — auto-sync local git repos on a schedule."""
+
+
+def _interactive_setup() -> dict:
+    """Walk the user through first-time setup and return the loaded config."""
+    click.echo(click.style("No config found.", fg="yellow", bold=True)
+               + f" ({cfg_mod.CONFIG_PATH})")
+    if not click.confirm("Set up daemon-git now?", default=True):
+        sys.exit(0)
+
+    click.echo("\nEnter the directories to scan for git repos.")
+    click.echo("Press Enter with an empty line when done.")
+    dirs: list[str] = []
+    default_dir = str(cfg_mod.CONFIG_PATH.home() / "projects")
+    while True:
+        prompt = f"Directory [{default_dir}]" if not dirs else "Directory (blank to finish)"
+        val = click.prompt(prompt, default="", show_default=False).strip()
+        if val == "":
+            if not dirs:
+                dirs.append(default_dir)
+            break
+        import os
+        val = os.path.expandvars(os.path.expanduser(val))
+        if not os.path.isdir(val):
+            create = click.confirm(
+                click.style(f"  '{val}' doesn't exist. Add anyway?", fg="yellow"),
+                default=False,
+            )
+            if not create:
+                continue
+        dirs.append(val)
+        click.echo(click.style(f"  + {val}", fg="green"))
+
+    interval = click.prompt(
+        "\nSync interval (seconds)", default=60, type=click.IntRange(5, 86400)
+    )
+
+    cfg_mod.init_config(dirs=dirs, interval=interval)
+    click.echo(click.style("\n✔ Config written to ", fg="green") + str(cfg_mod.CONFIG_PATH))
+    click.echo("You can edit it any time to add more directories.\n")
+    return cfg_mod.load()
 
 
 @cli.command()
@@ -215,9 +259,8 @@ def sync(verbose: bool):
     """Pull all repos once right now."""
     try:
         cfg = cfg_mod.load()
-    except FileNotFoundError as e:
-        click.echo(str(e))
-        sys.exit(1)
+    except FileNotFoundError:
+        cfg = _interactive_setup()
     _sync_all(cfg, verbose)
 
 
@@ -227,9 +270,8 @@ def run(verbose: bool):
     """Start the daemon — pulls every configured interval (default: 60s)."""
     try:
         cfg = cfg_mod.load()
-    except FileNotFoundError as e:
-        click.echo(str(e))
-        sys.exit(1)
+    except FileNotFoundError:
+        cfg = _interactive_setup()
 
     interval = cfg_mod.get_interval(cfg)
     click.echo(
