@@ -1,7 +1,7 @@
 """Load ~/.daemon-git/config.toml and provide auth helpers."""
 
-import base64
 import re
+import subprocess
 import sys
 if sys.version_info >= (3, 11):
     import tomllib
@@ -24,17 +24,9 @@ paths = [
     "C:\\\\Users\\\\yourname\\\\projects",
 ]
 
-# Git credentials per host (for HTTPS remotes).
-# Add one [[credentials]] section per account.
-# For SSH remotes, credentials are not needed here.
-
-[credentials."github.com"]
-username = "your-github-username"
-token    = "ghp_your_personal_access_token"
-
-# [credentials."gitlab.com"]
-# username = "your-gitlab-username"
-# token    = "glpat_your_token"
+# Authentication is handled via the GitHub CLI.
+# Run 'gh auth login' once before using daemon-git.
+# No credentials need to be stored here.
 """
 
 
@@ -77,18 +69,17 @@ def _host(remote_url: str) -> Optional[str]:
 
 def auth_args(remote_url: str, cfg: dict) -> list[str]:
     """
-    Return ["-c", "http.extraheader=Authorization: Basic <token>"] for HTTPS
-    remotes whose host has credentials in the config. Returns [] otherwise.
+    Return ["-c", "credential.helper=!gh auth git-credential"] for HTTPS
+    remotes when the gh CLI is authenticated. Returns [] for SSH remotes
+    or if gh is unavailable.
     """
     if not remote_url or remote_url.startswith("git@"):
         return []
-    host = _host(remote_url)
-    if not host:
+    try:
+        subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True, timeout=5, check=True,
+        )
+    except Exception:
         return []
-    creds = cfg.get("credentials", {}).get(host)
-    if not creds:
-        return []
-    encoded = base64.b64encode(
-        f"{creds['username']}:{creds['token']}".encode()
-    ).decode()
-    return ["-c", f"http.extraheader=Authorization: Basic {encoded}"]
+    return ["-c", "credential.helper=!gh auth git-credential"]

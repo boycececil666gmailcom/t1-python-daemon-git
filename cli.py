@@ -5,8 +5,6 @@ import os
 import subprocess
 import sys
 import time
-import urllib.request
-import urllib.error
 from datetime import datetime, timezone
 
 import click
@@ -122,31 +120,19 @@ def _now() -> str:
 
 # ── GitHub helpers ────────────────────────────────────────
 
-def _github_creds(cfg: dict) -> tuple[str, str] | None:
-    """Return (username, token) for github.com if configured."""
-    creds = cfg.get("credentials", {}).get("github.com")
-    if creds:
-        return creds["username"], creds["token"]
-    return None
-
-
-def _list_github_repos(username: str, token: str) -> list[dict]:
-    """Fetch all repos owned by *username* from the GitHub API."""
+def _list_github_repos() -> list[dict]:
+    """Fetch all repos owned by the authenticated user via gh CLI."""
     repos = []
     page = 1
     while True:
-        url = f"https://api.github.com/user/repos?per_page=100&page={page}&affiliation=owner"
-        req = urllib.request.Request(url, headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        })
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read())
-        except urllib.error.URLError as e:
-            click.echo(click.style(f"  GitHub API error: {e}", fg="red"))
+        r = subprocess.run(
+            ["gh", "api", f"/user/repos?per_page=100&page={page}&affiliation=owner"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            click.echo(click.style(f"  GitHub API error: {r.stderr.strip()}", fg="red"))
             break
+        data = json.loads(r.stdout)
         if not data:
             break
         repos.extend(data)
@@ -155,14 +141,21 @@ def _list_github_repos(username: str, token: str) -> list[dict]:
 
 
 def _ensure_cloned(cfg: dict, dest_root: str) -> None:
-    """Clone any GitHub repos not yet present in *dest_root*."""
-    creds = _github_creds(cfg)
-    if not creds:
+    """Clone any GitHub repos not yet present in *dest_root* using gh CLI."""
+    # Check gh is available and authenticated
+    if subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=5).returncode != 0:
         return
-    username, token = creds
+
+    username_r = subprocess.run(
+        ["gh", "api", "user", "--jq", ".login"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if username_r.returncode != 0:
+        return
+    username = username_r.stdout.strip()
 
     click.echo(f"Checking GitHub repos for {username}…")
-    remote_repos = _list_github_repos(username, token)
+    remote_repos = _list_github_repos()
     if not remote_repos:
         return
 
@@ -187,10 +180,8 @@ def _ensure_cloned(cfg: dict, dest_root: str) -> None:
             skipped += 1
             continue
         click.echo(f"  Cloning {name}…")
-        # Inject credentials into the clone URL
-        auth_url = clone_url.replace("https://", f"https://{username}:{token}@")
         r = subprocess.run(
-            ["git", "clone", auth_url, target],
+            ["gh", "repo", "clone", repo["full_name"], target],
             capture_output=True, text=True, timeout=300,
         )
         if r.returncode == 0:
